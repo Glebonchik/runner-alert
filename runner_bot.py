@@ -1,25 +1,153 @@
-from flask import Flask, request
+import os
+import requests
 import telebot
 
-TOKEN = "TOKEN"
+from flask import Flask, request
 
-bot = telebot.TeleBot(TOKEN)
+# ===== ENV =====
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+CHAT_ID = int(os.getenv("CHAT_ID"))
+
+GITLAB_TOKEN = os.getenv("GITLAB_TOKEN")
+PROJECT_ID = int(os.getenv("PROJECT_ID"))
+RUNNER_ID = int(os.getenv("RUNNER_ID"))
+
+# =================
+
+bot = telebot.TeleBot(TELEGRAM_TOKEN)
+
 app = Flask(__name__)
+
+previous_status = None
+
+
+def get_runner_status():
+    url = f"https://gitlab.com/api/v4/projects/{PROJECT_ID}/runners"
+
+    headers = {
+        "PRIVATE-TOKEN": GITLAB_TOKEN
+    }
+
+    try:
+        r = requests.get(url, headers=headers, timeout=10)
+
+        if r.status_code != 200:
+            print(f"GitLab API error: {r.status_code}")
+            return None
+
+        runners = r.json()
+
+        for runner in runners:
+            if runner["id"] == RUNNER_ID:
+                return runner.get("status")
+
+        print("Runner not found")
+        return None
+
+    except Exception as e:
+        print(f"Request failed: {e}")
+        return None
+
+
+def send_alert(status):
+    if status == "online":
+        text = "🟢 Backend runner ONLINE"
+    elif status == "offline":
+        text = "🔴 Backend runner OFFLINE"
+    else:
+        text = f"⚠️ Runner status changed: {status}"
+
+    try:
+        bot.send_message(CHAT_ID, text)
+    except Exception as e:
+        print(f"Telegram send error: {e}")
+
+
+@bot.message_handler(commands=['start'])
+def start(message):
+    bot.reply_to(message, "Runner alert bot started")
+
 
 @bot.message_handler(commands=['status'])
 def status(message):
-    bot.reply_to(message, "Runner online")
 
-@app.route(f"/{TOKEN}", methods=["POST"])
+    if message.chat.id != CHAT_ID:
+        return
+
+    runner_status = get_runner_status()
+
+    if runner_status == "online":
+        reply = "🟢 Runner online"
+
+    elif runner_status == "offline":
+        reply = "🔴 Runner offline"
+
+    else:
+        reply = "⚠️ Could not get runner status"
+
+    bot.reply_to(message, reply)
+
+
+@app.route("/", methods=["GET"])
+def home():
+    return "Bot is running", 200
+
+
+@app.route(f"/{TELEGRAM_TOKEN}", methods=["POST"])
 def webhook():
-    json_str = request.get_data().decode("UTF-8")
-    update = telebot.types.Update.de_json(json_str)
-    bot.process_new_updates([update])
-    return "ok", 200
 
-@app.route("/")
-def index():
-    return "Bot alive", 200
+    json_str = request.get_data().decode("UTF-8")
+
+    update = telebot.types.Update.de_json(json_str)
+
+    bot.process_new_updates([update])
+
+    return "OK", 200
+
+
+@app.route("/health", methods=["GET"])
+def health():
+    return "healthy", 200
+
+
+def check_runner():
+
+    global previous_status
+
+    current_status = get_runner_status()
+
+    if current_status is None:
+        return
+
+    if previous_status is None:
+        previous_status = current_status
+        print(f"Initial status: {current_status}")
+        return
+
+    if current_status != previous_status:
+
+        print(f"Status changed: {previous_status} -> {current_status}")
+
+        send_alert(current_status)
+
+        previous_status = current_status
+
+
+@app.route("/check", methods=["GET"])
+def check():
+
+    secret = request.args.get("secret")
+
+    if secret != os.getenv("CHECK_SECRET"):
+        return "Forbidden", 403
+
+    check_runner()
+
+    return "Checked", 200
+
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=10000)
+
+    port = int(os.getenv("PORT", 10000))
+
+    app.run(host="0.0.0.0", port=port)
