@@ -128,25 +128,41 @@ def health():
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
-
     try:
-
         print("Webhook received")
-
         json_str = request.get_data().decode("UTF-8")
-
         print(json_str)
-
         update = telebot.types.Update.de_json(json_str)
 
+        # Ручная обработка команды /status
+        if update.message and update.message.text and update.message.text.startswith('/status'):
+            print("Manual handling of /status")
+            runner_status = get_runner_status()
+            if runner_status == "online":
+                reply = "🟢 Runner online"
+            elif runner_status == "offline":
+                reply = "🔴 Runner offline"
+            else:
+                reply = "⚠️ Could not get runner status"
+            # Отправляем ответ через API (через прокси)
+            send_url = f"https://telegram-proxy-api.bulkabread2.workers.dev/bot{TELEGRAM_TOKEN}/sendMessage"
+            payload = {
+                "chat_id": update.message.chat.id,
+                "text": reply,
+                "reply_to_message_id": update.message.message_id
+            }
+            try:
+                r = requests.post(send_url, json=payload, timeout=10)
+                print(f"Manual send response: {r.status_code} - {r.text}")
+            except Exception as e:
+                print(f"Manual send error: {e}")
+            return "OK", 200
+
+        # Если не /status, передаём в обычные обработчики (на всякий случай)
         bot.process_new_updates([update])
-
         return "OK", 200
-
     except Exception as e:
-
         print(f"Webhook error: {e}")
-
         return "ERROR", 500
 
 
