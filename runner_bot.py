@@ -6,7 +6,7 @@ from telebot import apihelper
 from flask import Flask, request
 
 # ========= TELEGRAM PROXY =========
-apihelper.API_URL = "https://telegram-proxy-api.bulkabread2.workers.dev/bot{0}/{1}"
+apihelper.API_URL = "https://telegram-proxy-api.bulkabread2.workers.dev"
 
 # ========= ENV =========
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
