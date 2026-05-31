@@ -14,7 +14,6 @@ CHAT_ID = int(os.getenv("CHAT_ID"))
 
 GITLAB_TOKEN = os.getenv("GITLAB_TOKEN")
 PROJECT_ID = int(os.getenv("PROJECT_ID"))
-RUNNER_ID = int(os.getenv("RUNNER_ID"))
 
 CHECK_SECRET = os.getenv("CHECK_SECRET")
 
@@ -24,11 +23,43 @@ bot = telebot.TeleBot(TELEGRAM_TOKEN)
 
 app = Flask(__name__)
 
-previous_status = None
+previous_statuses = {}
 
 
 # ========= GITLAB =========
-def get_runner_status():
+# def get_runner_status():
+
+#     url = f"https://gitlab.com/api/v4/projects/{PROJECT_ID}/runners"
+
+#     headers = {
+#         "PRIVATE-TOKEN": GITLAB_TOKEN
+#     }
+
+#     try:
+
+#         r = requests.get(url, headers=headers, timeout=10)
+
+#         if r.status_code != 200:
+#             print(f"GitLab API error: {r.status_code}")
+#             print(r.text)
+#             return None
+
+#         runners = r.json()
+
+#         for runner in runners:
+
+#             if runner["id"] == RUNNER_ID:
+#                 return runner.get("status")
+
+#         print("Runner not found")
+#         return None
+
+#     except Exception as e:
+#         print(f"GitLab request failed: {e}")
+#         return None
+
+
+def get_all_runners():
 
     url = f"https://gitlab.com/api/v4/projects/{PROJECT_ID}/runners"
 
@@ -45,34 +76,12 @@ def get_runner_status():
             print(r.text)
             return None
 
-        runners = r.json()
-
-        for runner in runners:
-
-            if runner["id"] == RUNNER_ID:
-                return runner.get("status")
-
-        print("Runner not found")
-        return None
+        return r.json()
 
     except Exception as e:
+
         print(f"GitLab request failed: {e}")
         return None
-
-
-def get_all_runners():
-    url = f"https://gitlab.com/api/v4/projects/{PROJECT_ID}/runners"
-
-    headers = {
-        "PRIVATE-TOKEN": GITLAB_TOKEN
-    }
-
-    r = requests.get(url, headers=headers, timeout=10)
-
-    if r.status_code != 200:
-        return None
-
-    return r.json()
 
 # ========= TELEGRAM =========
 def send_alert(status):
@@ -97,39 +106,75 @@ def send_alert(status):
 
 
 # ========= COMMANDS =========
+
+def send_message(chat_id, text, thread_id=None):
+
+    payload = {
+        "chat_id": chat_id,
+        "text": text
+    }
+
+    if thread_id:
+        payload["message_thread_id"] = thread_id
+
+    try:
+
+        url = (
+            "https://telegram-proxy-api.bulkabread2.workers.dev"
+            f"/bot{TELEGRAM_TOKEN}/sendMessage"
+        )
+
+        r = requests.post(
+            url,
+            json=payload,
+            timeout=10
+        )
+
+        print(f"Telegram response: {r.text}")
+
+    except Exception as e:
+
+        print(f"Telegram send error: {e}")
+
 @bot.message_handler(commands=['status'])
 def status(message):
 
     runners = get_all_runners()
 
     if not runners:
+
         send_message(
             message.chat.id,
-            "⚠️ Не удалось получить список раннеров"
+            "⚠️ Не удалось получить список раннеров",
+            message.message_thread_id
         )
+
         return
 
-    text = "📊 Статус раннеров:\n\n"
+    text = "📊 Статус раннеров\n\n"
 
     for runner in runners:
 
-        name = runner.get("description", "Unknown")
+        runner_name = runner.get("description", "Unknown")
         runner_id = runner.get("id")
-        status = runner.get("status")
+        runner_status = runner.get("status")
 
         emoji = {
             "online": "🟢",
             "offline": "🔴",
             "stale": "🟡",
             "never_contacted": "⚪"
-        }.get(status, "⚠️")
+        }.get(runner_status, "⚠️")
 
-        text += f"{emoji} {name} (ID: {runner_id})\n"
+        text += (
+            f"{emoji} {runner_name} "
+            f"(ID: {runner_id})\n"
+        )
 
     send_message(
         message.chat.id,
         text,
-        thread_id=message.message_thread_id
+        message.message_thread_id
     )
 
 
@@ -155,82 +200,22 @@ def health():
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
+
     try:
-        print("Webhook received")
+
         json_str = request.get_data().decode("UTF-8")
-        print(json_str)
+
         update = telebot.types.Update.de_json(json_str)
 
-        # Ручная обработка команды /status
-        if update.message and update.message.text and update.message.text.startswith('/status'):
-            print("Manual handling of /status")
-            runner_status = get_runner_status()
-            if runner_status == "online":
-                reply = "🟢 Runner online"
-            elif runner_status == "offline":
-                reply = "🔴 Runner offline"
-            else:
-                reply = "⚠️ Could not get runner status"
-            # Отправляем ответ через API (через прокси)
-            send_url = f"https://telegram-proxy-api.bulkabread2.workers.dev/bot{TELEGRAM_TOKEN}/sendMessage"
-            payload = {
-                "chat_id": update.message.chat.id,
-                "text": reply,
-                "reply_to_message_id": update.message.message_id
-            }
-            try:
-                r = requests.post(send_url, json=payload, timeout=10)
-                print(f"Manual send response: {r.status_code} - {r.text}")
-            except Exception as e:
-                print(f"Manual send error: {e}")
-            return "OK", 200
-
-        # Если не /status, передаём в обычные обработчики (на всякий случай)
         bot.process_new_updates([update])
+
         return "OK", 200
+
     except Exception as e:
+
         print(f"Webhook error: {e}")
+
         return "ERROR", 500
-
-
-# ========= RUNNER CHECK =========
-def check_runner():
-
-    global previous_status
-
-    current_status = get_runner_status()
-
-    if current_status is None:
-        return
-
-    if previous_status is None:
-
-        previous_status = current_status
-
-        print(f"Initial status: {current_status}")
-
-        return
-
-    if current_status != previous_status:
-
-        print(f"Status changed: {previous_status} -> {current_status}")
-
-        send_alert(current_status)
-
-        previous_status = current_status
-
-
-@app.route("/check", methods=["GET"])
-def check():
-
-    secret = request.args.get("secret")
-
-    if secret != CHECK_SECRET:
-        return "Forbidden", 403
-
-    check_runner()
-
-    return "Checked", 200
 
 
 # ========= MAIN =========
