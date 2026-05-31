@@ -60,6 +60,20 @@ def get_runner_status():
         return None
 
 
+def get_all_runners():
+    url = f"https://gitlab.com/api/v4/projects/{PROJECT_ID}/runners"
+
+    headers = {
+        "PRIVATE-TOKEN": GITLAB_TOKEN
+    }
+
+    r = requests.get(url, headers=headers, timeout=10)
+
+    if r.status_code != 200:
+        return None
+
+    return r.json()
+
 # ========= TELEGRAM =========
 def send_alert(status):
 
@@ -86,24 +100,37 @@ def send_alert(status):
 @bot.message_handler(commands=['status'])
 def status(message):
 
-    print("STATUS COMMAND")
+    runners = get_all_runners()
 
-    if message.chat.id != CHAT_ID:
-        print(f"Unauthorized chat: {message.chat.id}")
+    if not runners:
+        send_message(
+            message.chat.id,
+            "⚠️ Не удалось получить список раннеров"
+        )
         return
 
-    runner_status = get_runner_status()
+    text = "📊 Статус раннеров:\n\n"
 
-    if runner_status == "online":
-        reply = "🟢 Runner online"
+    for runner in runners:
 
-    elif runner_status == "offline":
-        reply = "🔴 Runner offline"
+        name = runner.get("description", "Unknown")
+        runner_id = runner.get("id")
+        status = runner.get("status")
 
-    else:
-        reply = "⚠️ Could not get runner status"
+        emoji = {
+            "online": "🟢",
+            "offline": "🔴",
+            "stale": "🟡",
+            "never_contacted": "⚪"
+        }.get(status, "⚠️")
 
-    bot.reply_to(message, reply)
+        text += f"{emoji} {name} (ID: {runner_id})\n"
+
+    send_message(
+        message.chat.id,
+        text,
+        thread_id=message.message_thread_id
+    )
 
 
 # ========= DEBUG =========
