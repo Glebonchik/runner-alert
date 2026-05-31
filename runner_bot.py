@@ -138,44 +138,114 @@ def send_message(chat_id, text, thread_id=None):
 
 @bot.message_handler(commands=['status'])
 def status(message):
+    import json
+    import traceback
 
-    runners = get_all_runners()
+    print("\n========== /STATUS COMMAND ==========")
+    print("CHAT ID:", message.chat.id)
+    print("THREAD ID:", getattr(message, "message_thread_id", None))
+    print("FROM USER:", message.from_user.username if message.from_user else None)
 
-    if not runners:
+    try:
+        runners = get_all_runners()
 
-        send_message(
-            message.chat.id,
-            "⚠️ Не удалось получить список раннеров",
-            message.message_thread_id
-        )
+        print("RAW RUNNERS RESPONSE:")
+        print(json.dumps(runners, indent=2, ensure_ascii=False))
 
-        return
+        if not runners:
+            print("ERROR: runners is empty or None")
 
-    text = "📊 Статус раннеров\n\n"
+            send_message(
+                message.chat.id,
+                "⚠️ Не удалось получить список раннеров"
+            )
+            return
 
-    for runner in runners:
+        # ========= FORMAT MESSAGE =========
+        lines = []
+        lines.append("📊 <b>GitLab Runners Status</b>\n")
 
-        runner_name = runner.get("description", "Unknown")
-        runner_id = runner.get("id")
-        runner_status = runner.get("status")
+        for r in runners:
+            name = r.get("description", "Unknown")
+            rid = r.get("id", "N/A")
+            status_val = r.get("status", "unknown")
+            busy = r.get("busy", False)
+            version = r.get("version", "n/a")
 
-        emoji = {
-            "online": "🟢",
-            "offline": "🔴",
-            "stale": "🟡",
-            "never_contacted": "⚪"
-        }.get(runner_status, "⚠️")
+            emoji_map = {
+                "online": "🟢",
+                "offline": "🔴",
+                "stale": "🟡",
+                "never_contacted": "⚪"
+            }
 
-        text += (
-            f"{emoji} {runner_name} "
-            f"(ID: {runner_id})\n"
-        )
+            emoji = emoji_map.get(status_val, "⚠️")
 
-    send_message(
-        message.chat.id,
-        text,
-        message.message_thread_id
-    )
+            line = (
+                f"{emoji} <b>{name}</b>\n"
+                f"   ├ ID: <code>{rid}</code>\n"
+                f"   ├ Status: <code>{status_val}</code>\n"
+                f"   ├ Busy: <code>{busy}</code>\n"
+                f"   └ Version: <code>{version}</code>\n"
+            )
+
+            lines.append(line)
+
+        text = "\n".join(lines)
+
+        print("\nFORMATTED MESSAGE:\n", text)
+
+        # ========= SAFE SEND =========
+        chat_id = message.chat.id
+
+        try:
+            thread_id = getattr(message, "message_thread_id", None)
+        except Exception:
+            thread_id = None
+
+        print("\nSENDING TO TELEGRAM...")
+        print("CHAT:", chat_id)
+        print("THREAD:", thread_id)
+
+        payload = {
+            "chat_id": chat_id,
+            "text": text,
+            "parse_mode": "HTML",
+            "disable_web_page_preview": True
+        }
+
+        # forum threads ONLY if exists
+        if thread_id:
+            payload["message_thread_id"] = thread_id
+
+        url = f"https://telegram-proxy-api.bulkabread2.workers.dev/bot{TELEGRAM_TOKEN}/sendMessage"
+
+        print("REQUEST URL:", url)
+        print("PAYLOAD:", json.dumps(payload, ensure_ascii=False))
+
+        r = requests.post(url, json=payload, timeout=10)
+
+        print("\nTELEGRAM RESPONSE STATUS:", r.status_code)
+        print("TELEGRAM RESPONSE TEXT:", r.text)
+
+        if r.status_code != 200:
+            print("❌ TELEGRAM API ERROR")
+        else:
+            print("✅ MESSAGE SENT SUCCESSFULLY")
+
+    except Exception:
+        print("🔥 EXCEPTION IN /STATUS:")
+        print(traceback.format_exc())
+
+        try:
+            send_message(
+                message.chat.id,
+                "❌ Ошибка при получении статуса runner'ов"
+            )
+        except Exception as e:
+            print("FAILED TO SEND ERROR MESSAGE:", e)
+
+    print("========== END /STATUS ==========\n")
 
 
 # ========= DEBUG =========
