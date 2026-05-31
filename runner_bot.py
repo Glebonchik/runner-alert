@@ -143,9 +143,6 @@ def webhook():
             msg = format_runners(runners)
             send_raw(chat_id, msg)
 
-        else:
-            print("UNKNOWN COMMAND")
-            send_raw(chat_id, f"Echo: {text}")
 
         return "OK", 200
 
