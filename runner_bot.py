@@ -1,211 +1,26 @@
 import os
+import json
 import requests
-import telebot
-
-from telebot import apihelper
+import traceback
 from flask import Flask, request
-
-# ========= TELEGRAM PROXY =========
-apihelper.API_URL = "https://telegram-proxy-api.bulkabread2.workers.dev"
 
 # ========= ENV =========
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-CHAT_ID = int(os.getenv("CHAT_ID"))
-
-GITLAB_TOKEN = os.getenv("GITLAB_TOKEN")
 PROJECT_ID = int(os.getenv("PROJECT_ID"))
+GITLAB_TOKEN = os.getenv("GITLAB_TOKEN")
 
-CHECK_SECRET = os.getenv("CHECK_SECRET")
-
-# =======================
-
-bot = telebot.TeleBot(TELEGRAM_TOKEN)
+# ========= TELEGRAM PROXY =========
+TELEGRAM_API = "https://telegram-proxy-api.bulkabread2.workers.dev"
 
 app = Flask(__name__)
 
-previous_statuses = {}
 
-
-# ========= GITLAB =========
-# def get_runner_status():
-
-#     url = f"https://gitlab.com/api/v4/projects/{PROJECT_ID}/runners"
-
-#     headers = {
-#         "PRIVATE-TOKEN": GITLAB_TOKEN
-#     }
-
-#     try:
-
-#         r = requests.get(url, headers=headers, timeout=10)
-
-#         if r.status_code != 200:
-#             print(f"GitLab API error: {r.status_code}")
-#             print(r.text)
-#             return None
-
-#         runners = r.json()
-
-#         for runner in runners:
-
-#             if runner["id"] == RUNNER_ID:
-#                 return runner.get("status")
-
-#         print("Runner not found")
-#         return None
-
-#     except Exception as e:
-#         print(f"GitLab request failed: {e}")
-#         return None
-
-
-def get_all_runners():
-
-    url = f"https://gitlab.com/api/v4/projects/{PROJECT_ID}/runners"
-
-    headers = {
-        "PRIVATE-TOKEN": GITLAB_TOKEN
-    }
-
+# =========================
+# TELEGRAM SENDER (ONLY ONE)
+# =========================
+def send_raw(chat_id, text):
     try:
-
-        r = requests.get(url, headers=headers, timeout=10)
-
-        if r.status_code != 200:
-            print(f"GitLab API error: {r.status_code}")
-            print(r.text)
-            return None
-
-        return r.json()
-
-    except Exception as e:
-
-        print(f"GitLab request failed: {e}")
-        return None
-
-# ========= TELEGRAM =========
-def send_alert(status):
-
-    if status == "online":
-        text = "🟢 Backend runner ONLINE"
-
-    elif status == "offline":
-        text = "🔴 Backend runner OFFLINE"
-
-    else:
-        text = f"⚠️ Runner status changed: {status}"
-
-    try:
-
-        bot.send_message(CHAT_ID, text)
-
-        print(f"Alert sent: {text}")
-
-    except Exception as e:
-        print(f"Telegram send error: {e}")
-
-
-# ========= COMMANDS =========
-
-def send_message(chat_id, text, thread_id=None):
-
-    payload = {
-        "chat_id": chat_id,
-        "text": text
-    }
-
-    if thread_id:
-        payload["message_thread_id"] = thread_id
-
-    try:
-
-        url = (
-            "https://telegram-proxy-api.bulkabread2.workers.dev"
-            f"/bot{TELEGRAM_TOKEN}/sendMessage"
-        )
-
-        r = requests.post(
-            url,
-            json=payload,
-            timeout=10
-        )
-
-        print(f"Telegram response: {r.text}")
-
-    except Exception as e:
-
-        print(f"Telegram send error: {e}")
-
-@bot.message_handler(commands=['status'])
-def status(message):
-    import json
-    import traceback
-
-    print("\n========== /STATUS COMMAND ==========")
-    print("CHAT ID:", message.chat.id)
-    print("THREAD ID:", getattr(message, "message_thread_id", None))
-    print("FROM USER:", message.from_user.username if message.from_user else None)
-
-    try:
-        runners = get_all_runners()
-
-        print("RAW RUNNERS RESPONSE:")
-        print(json.dumps(runners, indent=2, ensure_ascii=False))
-
-        if not runners:
-            print("ERROR: runners is empty or None")
-
-            send_message(
-                message.chat.id,
-                "⚠️ Не удалось получить список раннеров"
-            )
-            return
-
-        # ========= FORMAT MESSAGE =========
-        lines = []
-        lines.append("📊 <b>GitLab Runners Status</b>\n")
-
-        for r in runners:
-            name = r.get("description", "Unknown")
-            rid = r.get("id", "N/A")
-            status_val = r.get("status", "unknown")
-            busy = r.get("busy", False)
-            version = r.get("version", "n/a")
-
-            emoji_map = {
-                "online": "🟢",
-                "offline": "🔴",
-                "stale": "🟡",
-                "never_contacted": "⚪"
-            }
-
-            emoji = emoji_map.get(status_val, "⚠️")
-
-            line = (
-                f"{emoji} <b>{name}</b>\n"
-                f"   ├ ID: <code>{rid}</code>\n"
-                f"   ├ Status: <code>{status_val}</code>\n"
-                f"   ├ Busy: <code>{busy}</code>\n"
-                f"   └ Version: <code>{version}</code>\n"
-            )
-
-            lines.append(line)
-
-        text = "\n".join(lines)
-
-        print("\nFORMATTED MESSAGE:\n", text)
-
-        # ========= SAFE SEND =========
-        chat_id = message.chat.id
-
-        try:
-            thread_id = getattr(message, "message_thread_id", None)
-        except Exception:
-            thread_id = None
-
-        print("\nSENDING TO TELEGRAM...")
-        print("CHAT:", chat_id)
-        print("THREAD:", thread_id)
+        url = f"{TELEGRAM_API}/bot{TELEGRAM_TOKEN}/sendMessage"
 
         payload = {
             "chat_id": chat_id,
@@ -214,50 +29,135 @@ def status(message):
             "disable_web_page_preview": True
         }
 
-        # forum threads ONLY if exists
-        if thread_id:
-            payload["message_thread_id"] = thread_id
-
-        url = f"https://telegram-proxy-api.bulkabread2.workers.dev/bot{TELEGRAM_TOKEN}/sendMessage"
-
-        print("REQUEST URL:", url)
+        print("\n========== TELEGRAM SEND ==========")
+        print("URL:", url)
         print("PAYLOAD:", json.dumps(payload, ensure_ascii=False))
 
         r = requests.post(url, json=payload, timeout=10)
 
-        print("\nTELEGRAM RESPONSE STATUS:", r.status_code)
-        print("TELEGRAM RESPONSE TEXT:", r.text)
-
-        if r.status_code != 200:
-            print("❌ TELEGRAM API ERROR")
-        else:
-            print("✅ MESSAGE SENT SUCCESSFULLY")
+        print("STATUS:", r.status_code)
+        print("RESPONSE:", r.text)
+        print("===================================\n")
 
     except Exception:
-        print("🔥 EXCEPTION IN /STATUS:")
+        print("🔥 TELEGRAM SEND ERROR:")
         print(traceback.format_exc())
 
-        try:
-            send_message(
-                message.chat.id,
-                "❌ Ошибка при получении статуса runner'ов"
-            )
-        except Exception as e:
-            print("FAILED TO SEND ERROR MESSAGE:", e)
 
-    print("========== END /STATUS ==========\n")
+# =========================
+# GITLAB RUNNERS
+# =========================
+def get_all_runners():
+    try:
+        url = f"https://gitlab.com/api/v4/projects/{PROJECT_ID}/runners"
+
+        headers = {
+            "PRIVATE-TOKEN": GITLAB_TOKEN
+        }
+
+        r = requests.get(url, headers=headers, timeout=10)
+
+        print("\n========== GITLAB RESPONSE ==========")
+        print("STATUS:", r.status_code)
+        print("BODY:", r.text)
+        print("====================================\n")
+
+        if r.status_code != 200:
+            return None
+
+        return r.json()
+
+    except Exception:
+        print("🔥 GITLAB ERROR:")
+        print(traceback.format_exc())
+        return None
 
 
-# ========= DEBUG =========
-@bot.message_handler(func=lambda message: True)
-def debug_all(message):
+# =========================
+# FORMAT RUNNERS
+# =========================
+def format_runners(runners):
+    text = "📊 <b>GitLab Runners Status</b>\n\n"
 
-    print(f"MESSAGE RECEIVED: {message.text}")
+    emoji_map = {
+        "online": "🟢",
+        "offline": "🔴",
+        "stale": "🟡",
+        "never_contacted": "⚪"
+    }
 
-    bot.reply_to(message, f"Echo: {message.text}")
+    for r in runners:
+        name = r.get("description", "Unknown")
+        rid = r.get("id", "N/A")
+        status = r.get("status", "unknown")
+        busy = r.get("busy", False)
+
+        emoji = emoji_map.get(status, "⚠️")
+
+        text += (
+            f"{emoji} <b>{name}</b>\n"
+            f" ├ ID: <code>{rid}</code>\n"
+            f" ├ Status: <code>{status}</code>\n"
+            f" └ Busy: <code>{busy}</code>\n\n"
+        )
+
+    return text
 
 
-# ========= FLASK =========
+# =========================
+# WEBHOOK
+# =========================
+@app.route("/webhook", methods=["POST"])
+def webhook():
+    try:
+        update = request.get_json(force=True)
+
+        print("\n========== RAW UPDATE ==========")
+        print(json.dumps(update, indent=2, ensure_ascii=False))
+        print("================================\n")
+
+        message = update.get("message")
+
+        if not message:
+            print("NO MESSAGE IN UPDATE")
+            return "OK", 200
+
+        chat_id = message["chat"]["id"]
+        text = message.get("text", "")
+
+        print("CHAT ID:", chat_id)
+        print("TEXT:", text)
+
+        # =========================
+        # COMMAND HANDLER
+        # =========================
+        if text.startswith("/status"):
+            print("🔥 STATUS COMMAND TRIGGERED")
+
+            runners = get_all_runners()
+
+            if not runners:
+                send_raw(chat_id, "⚠️ Не удалось получить список runner'ов")
+                return "OK", 200
+
+            msg = format_runners(runners)
+            send_raw(chat_id, msg)
+
+        else:
+            print("UNKNOWN COMMAND")
+            send_raw(chat_id, f"Echo: {text}")
+
+        return "OK", 200
+
+    except Exception:
+        print("🔥 WEBHOOK ERROR:")
+        print(traceback.format_exc())
+        return "ERROR", 500
+
+
+# =========================
+# HEALTHCHECK
+# =========================
 @app.route("/", methods=["GET"])
 def home():
     return "Bot is running", 200
@@ -268,30 +168,9 @@ def health():
     return "healthy", 200
 
 
-@app.route("/webhook", methods=["POST"])
-def webhook():
-    try:
-        json_str = request.get_data().decode("UTF-8")
-        print("RAW UPDATE:", json_str)
-
-        update = telebot.types.Update.de_json(json_str)
-
-        print("PROCESSING UPDATE")
-        bot.process_new_updates([update])
-
-        print("DONE PROCESSING")
-
-        return "OK", 200
-
-    except Exception as e:
-        import traceback
-        print("WEBHOOK ERROR:", traceback.format_exc())
-        return "ERROR", 500
-
-
-# ========= MAIN =========
+# =========================
+# MAIN
+# =========================
 if __name__ == "__main__":
-
     port = int(os.getenv("PORT", 10000))
-
     app.run(host="0.0.0.0", port=port)
