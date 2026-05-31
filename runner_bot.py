@@ -200,21 +200,22 @@ def health():
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
-
     try:
-
         json_str = request.get_data().decode("UTF-8")
+        print("RAW UPDATE:", json_str)
 
         update = telebot.types.Update.de_json(json_str)
 
+        print("PROCESSING UPDATE")
         bot.process_new_updates([update])
+
+        print("DONE PROCESSING")
 
         return "OK", 200
 
     except Exception as e:
-
-        print(f"Webhook error: {e}")
-
+        import traceback
+        print("WEBHOOK ERROR:", traceback.format_exc())
         return "ERROR", 500
 
 
